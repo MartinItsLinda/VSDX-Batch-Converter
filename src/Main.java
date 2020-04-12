@@ -1,46 +1,72 @@
-import java.io.File;
+import org.apache.commons.lang3.StringUtils;
 
-import static spark.Spark.get;
-import static spark.Spark.port;
+import java.io.*;
+import java.nio.file.Files;
+import java.util.UUID;
+
+import static spark.Spark.*;
 
 public class Main {
 
+    @SuppressWarnings("ResultOfMethodCallIgnored")
     public static void main(String[] args) {
 
-        port(8080);
-
-        get("/convert/:fileName", (req, resp) -> {
-            System.out.println(String.format("received request: %s", req.params(":fileName")));
-
-            if (req.params(":fileName") != null && !req.params(":fileName").isEmpty()) {
-                System.out.println("file name isn't null or empty, checking if it exists");
-
-                final File file = new File(req.params(":fileName"));
-                if (file.exists()) {
-                    System.out.println("File exists, converting it...");
-                    try {
-                        vsdxBatchConvert.execute(file);
-                        return genSucc(file.getName() + ".xml");
-                    } catch (final Exception ex) {
-                        return genErr(ex.getMessage());
-                    }
-                } else {
-                    System.out.println("File doesn't appear to exist, giving an error response");
-                    return genErr("File doesn't exist");
-                }
+        int port = 8080;
+        if (args.length > 0) {
+            try {
+                port = Integer.parseInt(args[0]);
+            } catch (NumberFormatException ignored) {
+                System.out.println(String.format("Invalid integer value: %s, using default port...", args[0]));
             }
-            System.out.println("File name is empty, giving error response");
-            return genErr("File name cannot be empty");
+        }
+
+        System.out.println(String.format("Starting Spark on port %d", port));
+
+        port(port);
+
+        post("/convert/", (req, resp) -> {
+            System.out.println("Received new request, generating files...");
+
+            final File file = new File(UUID.randomUUID().toString() + ".vsdx");
+            final File converted = new File(StringUtils.substringBefore(file.getPath(), ".") + ".xml");
+
+            System.out.println(String.format("File created at: %s, writing contents", file.getPath()));
+            try (final BufferedOutputStream out = new BufferedOutputStream(new FileOutputStream(file))) {
+
+                out.write(req.bodyAsBytes());
+
+                System.out.println("Converting file...");
+
+                vsdxBatchConvert.execute(file);
+
+                System.out.println("Generating response body...");
+
+                final StringBuilder builder = new StringBuilder();
+                for (final String line : Files.readAllLines(converted.toPath())) {
+                    builder.append(line);
+                }
+
+                resp.body(builder.toString());
+
+                return resp.body();
+            } catch (final IOException ex) {
+                ex.printStackTrace();
+            } finally {
+
+                System.out.println("Deleting files...");
+
+                file.delete();
+                converted.delete();
+
+            }
+
+            System.out.println("An unexpected error occurred, giving 400 error (bad request)");
+
+            resp.status(400);
+
+            return null;
         });
 
-    }
-
-    private static String genSucc(final String fileName) {
-        return "{\"response\":\"success\",\"fileLocation\":\"" + fileName + "\"}";
-    }
-
-    private static String genErr(final String err) {
-        return "{\"response\":\"failure\",\"message\":\"" + err + "\"}";
     }
 
 }
