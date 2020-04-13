@@ -1,14 +1,15 @@
-import org.apache.commons.lang3.StringUtils;
+import com.mxgraph.io.mxVsdxCodec;
+import com.mxgraph.online.Utils;
+import org.xml.sax.SAXException;
 
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.transform.TransformerException;
 import java.io.*;
-import java.nio.file.Files;
-import java.util.UUID;
 
 import static spark.Spark.*;
 
 public class Main {
 
-    @SuppressWarnings("ResultOfMethodCallIgnored")
     public static void main(String[] args) {
 
         int port = 8080;
@@ -25,45 +26,23 @@ public class Main {
         port(port);
 
         post("/convert/", (req, resp) -> {
-            System.out.println("Received new request, generating files...");
+            System.out.println("Received new request, converting vsdx to xml...");
+            try {
+                final String decode = new mxVsdxCodec().decodeVsdx(req.bodyAsBytes(), Utils.CHARSET_FOR_URL_ENCODING);
+                if (decode != null) {
+                    System.out.println("Setting response body...");
 
-            final File file = new File(UUID.randomUUID().toString() + ".vsdx");
-            final File converted = new File(StringUtils.substringBefore(file.getPath(), ".") + ".xml");
+                    resp.body(decode);
 
-            System.out.println(String.format("File created as: %s, writing contents", file.getPath()));
-            try (final BufferedOutputStream out = new BufferedOutputStream(new FileOutputStream(file))) {
+                    System.out.println("Conversion successful, giving back response...");
 
-                out.write(req.bodyAsBytes());
-
-                System.out.println("Converting file...");
-
-                vsdxBatchConvert.execute(file);
-
-                System.out.println("Generating response body...");
-
-                final StringBuilder builder = new StringBuilder();
-                for (final String line : Files.readAllLines(converted.toPath())) {
-                    builder.append(line);
+                    return resp.body();
                 }
-
-                resp.body(builder.toString());
-
-                return resp.body();
-            } catch (final IOException ex) {
-                ex.printStackTrace();
-            } finally {
-
-                System.out.println("Deleting files...");
-
-                file.delete();
-                converted.delete();
-
+            } catch (IllegalArgumentException | IOException ex) {
+                System.out.println("An error occurred and the conversion could not occur, giving error 400 (bad request)");
+                System.out.println(String.format("Error: %s", ex.getMessage()));
             }
-
-            System.out.println("An unexpected error occurred, giving 400 error (bad request)");
-
             resp.status(400);
-
             return null;
         });
 
